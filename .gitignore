@@ -1,0 +1,13 @@
+# Execution file
+speed
+test
+
+# enable_ccr object file
+enable_ccr/*.cmd
+enable_ccr/Module.symvers
+enable_ccr/enable_ccr.ko
+enable_ccr/enable_ccr.mod
+enable_ccr/enable_ccr.mod.c
+enable_ccr/enable_ccr.mod.o
+enable_ccr/enable_ccr.o
+enable_ccr/modules.order
