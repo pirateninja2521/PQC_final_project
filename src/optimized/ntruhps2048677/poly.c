@@ -1,5 +1,8 @@
 #include <arm_neon.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "poly.h"
+#include "poly_utils.h"
 
 /* Polynomial multiplication using     */
 /* Toom-3, Toom-4 and two layers of Karatsuba. */
@@ -67,23 +70,23 @@ static void toom3_toom4_k2x2_mul(uint16_t ab[2 * L], const uint16_t a[L], const 
 
     toom3_toom4_k2x2_eval_0(tmpA, a);
     toom3_toom4_k2x2_eval_0(tmpB, b);
-    toom3_toom4_k2x2_basemul(eC + 0 * 2 * 64 * K16, tmpA, tmpB);
+    toom3_toom4_k2x2_basemul_neon(eC + 0 * 2 * 64 * K16, tmpA, tmpB);
 
     toom3_toom4_k2x2_eval_p1(tmpA, a);
     toom3_toom4_k2x2_eval_p1(tmpB, b);
-    toom3_toom4_k2x2_basemul(eC + 1 * 2 * 64 * K16, tmpA, tmpB);
+    toom3_toom4_k2x2_basemul_neon(eC + 1 * 2 * 64 * K16, tmpA, tmpB);
 
     toom3_toom4_k2x2_eval_m1(tmpA, a);
     toom3_toom4_k2x2_eval_m1(tmpB, b);
-    toom3_toom4_k2x2_basemul(eC + 2 * 2 * 64 * K16, tmpA, tmpB);
+    toom3_toom4_k2x2_basemul_neon(eC + 2 * 2 * 64 * K16, tmpA, tmpB);
 
     toom3_toom4_k2x2_eval_m2(tmpA, a);
     toom3_toom4_k2x2_eval_m2(tmpB, b);
-    toom3_toom4_k2x2_basemul(eC + 3 * 2 * 64 * K16, tmpA, tmpB);
+    toom3_toom4_k2x2_basemul_neon(eC + 3 * 2 * 64 * K16, tmpA, tmpB);
 
     toom3_toom4_k2x2_eval_inf(tmpA, a);
     toom3_toom4_k2x2_eval_inf(tmpB, b);
-    toom3_toom4_k2x2_basemul(eC + 4 * 2 * 64 * K16, tmpA, tmpB);
+    toom3_toom4_k2x2_basemul_neon(eC + 4 * 2 * 64 * K16, tmpA, tmpB);
 
     toom3_toom4_k2x2_interpolate(ab, eC);
 }
@@ -151,29 +154,17 @@ static void toom3_toom4_k2x2_basemul(uint16_t r[2 * 64 * K16], const uint16_t a[
 }
 
 static void toom3_toom4_k2x2_basemul_neon(uint16_t r[2 * 64 * K16], uint16_t a[64 * K16], uint16_t b[64 * K16]) {
-    const uint16_t *pa = a, *pb = b;
-    uint16_t *pr = r;
-    for (int i = 0; i != 64; i += 8) {
-        // Transpose
-        uint16_t aT[128], bT[128], rT[256];
-        for (int j = 0; j != K; ++j) {
-            for (int k = 0; k != 8 && i + k < 63; ++k) {
-                aT[j << 3 | k] = pa[K * k + j];
-                bT[j << 3 | k] = pb[K * k + j];
-            }
-        }
-        schoolbook_KxK_neon(rT, aT, bT);
-
-        for (int j = 0; j != 8; ++j) {
-            for (int k = 0; k != 29; ++k) {
-                pr[j * 2 * K + k] = rT[k << 3 | j];
-            }
-        }
-
-        pa += 8;
-        pb += 8;
-        pr += 8;
-    }
+    transpose8x8x16(a);
+    transpose8x8x16(b);
+    schoolbook_KxK_neon(r + 0 * 2 * K16, a + 0 * K16, b + 0 * K16);
+    schoolbook_KxK_neon(r + 8 * 2 * K16, a + 8 * K16, b + 8 * K16);
+    schoolbook_KxK_neon(r + 16 * 2 * K16, a + 16 * K16, b + 16 * K16);
+    schoolbook_KxK_neon(r + 24 * 2 * K16, a + 24 * K16, b + 24 * K16);
+    schoolbook_KxK_neon(r + 32 * 2 * K16, a + 32 * K16, b + 32 * K16);
+    schoolbook_KxK_neon(r + 40 * 2 * K16, a + 40 * K16, b + 40 * K16);
+    schoolbook_KxK_neon(r + 48 * 2 * K16, a + 48 * K16, b + 48 * K16);
+    schoolbook_KxK_neon(r + 56 * 2 * K16, a + 56 * K16, b + 56 * K16);
+    transpose8x8x32(r);
 }
 
 static void toom4_k2x2_eval_0(uint16_t r[9 * K16], const uint16_t a[N]) {
@@ -292,7 +283,318 @@ static inline void schoolbook_KxK_neon(uint16_t r[16 * K16], const uint16_t a[8 
     vr = vmulq_u16(va[0], vb[0]);
     vst1q_u16(r, vr);
 
-    // va[1] = vld1q_u16();
+    va[1] = vld1q_u16(a + 16 * 1);
+    vb[1] = vld1q_u16(b + 16 * 1);
+    vr = vmulq_u16(va[0], vb[1]);
+    vr = vmlaq_u16(vr, va[1], vb[0]);
+    vst1q_u16(r + 32 * 1, vr);
+
+    va[2] = vld1q_u16(a + 16 * 2);
+    vb[2] = vld1q_u16(b + 16 * 2);
+    vr = vmulq_u16(va[0], vb[2]);
+    vr = vmlaq_u16(vr, va[1], vb[1]);
+    vr = vmlaq_u16(vr, va[2], vb[0]);
+    vst1q_u16(r + 32 * 2, vr);
+
+    va[3] = vld1q_u16(a + 16 * 3);
+    vb[3] = vld1q_u16(b + 16 * 3);
+    vr = vmulq_u16(va[0], vb[3]);
+    vr = vmlaq_u16(vr, va[1], vb[2]);
+    vr = vmlaq_u16(vr, va[2], vb[1]);
+    vr = vmlaq_u16(vr, va[3], vb[0]);
+    vst1q_u16(r + 32 * 3, vr);
+
+    va[4] = vld1q_u16(a + 16 * 4);
+    vb[4] = vld1q_u16(b + 16 * 4);
+    vr = vmulq_u16(va[0], vb[4]);
+    vr = vmlaq_u16(vr, va[1], vb[3]);
+    vr = vmlaq_u16(vr, va[2], vb[2]);
+    vr = vmlaq_u16(vr, va[3], vb[1]);
+    vr = vmlaq_u16(vr, va[4], vb[0]);
+    vst1q_u16(r + 32 * 4, vr);
+
+    va[5] = vld1q_u16(a + 16 * 5);
+    vb[5] = vld1q_u16(b + 16 * 5);
+    vr = vmulq_u16(va[0], vb[5]);
+    vr = vmlaq_u16(vr, va[1], vb[4]);
+    vr = vmlaq_u16(vr, va[2], vb[3]);
+    vr = vmlaq_u16(vr, va[3], vb[2]);
+    vr = vmlaq_u16(vr, va[4], vb[1]);
+    vr = vmlaq_u16(vr, va[5], vb[0]);
+    vst1q_u16(r + 32 * 5, vr);
+
+    va[6] = vld1q_u16(a + 16 * 6);
+    vb[6] = vld1q_u16(b + 16 * 6);
+    vr = vmulq_u16(va[0], vb[6]);
+    vr = vmlaq_u16(vr, va[1], vb[5]);
+    vr = vmlaq_u16(vr, va[2], vb[4]);
+    vr = vmlaq_u16(vr, va[3], vb[3]);
+    vr = vmlaq_u16(vr, va[4], vb[2]);
+    vr = vmlaq_u16(vr, va[5], vb[1]);
+    vr = vmlaq_u16(vr, va[6], vb[0]);
+    vst1q_u16(r + 32 * 6, vr);
+
+    va[7] = vld1q_u16(a + 16 * 7);
+    vb[7] = vld1q_u16(b + 16 * 7);
+    vr = vmulq_u16(va[0], vb[7]);
+    vr = vmlaq_u16(vr, va[1], vb[6]);
+    vr = vmlaq_u16(vr, va[2], vb[5]);
+    vr = vmlaq_u16(vr, va[3], vb[4]);
+    vr = vmlaq_u16(vr, va[4], vb[3]);
+    vr = vmlaq_u16(vr, va[5], vb[2]);
+    vr = vmlaq_u16(vr, va[6], vb[1]);
+    vr = vmlaq_u16(vr, va[7], vb[0]);
+    vst1q_u16(r + 32 * 7, vr);
+
+    va[8] = vld1q_u16(a + 16 * 0 + 8);
+    vb[8] = vld1q_u16(b + 16 * 0 + 8);
+    vr = vmulq_u16(va[0], vb[8]);
+    vr = vmlaq_u16(vr, va[1], vb[7]);
+    vr = vmlaq_u16(vr, va[2], vb[6]);
+    vr = vmlaq_u16(vr, va[3], vb[5]);
+    vr = vmlaq_u16(vr, va[4], vb[4]);
+    vr = vmlaq_u16(vr, va[5], vb[3]);
+    vr = vmlaq_u16(vr, va[6], vb[2]);
+    vr = vmlaq_u16(vr, va[7], vb[1]);
+    vr = vmlaq_u16(vr, va[8], vb[0]);
+    vst1q_u16(r + 32 * 0 + 8, vr);
+
+    va[9] = vld1q_u16(a + 16 * 1 + 8);
+    vb[9] = vld1q_u16(b + 16 * 1 + 8);
+    vr = vmulq_u16(va[0], vb[9]);
+    vr = vmlaq_u16(vr, va[1], vb[8]);
+    vr = vmlaq_u16(vr, va[2], vb[7]);
+    vr = vmlaq_u16(vr, va[3], vb[6]);
+    vr = vmlaq_u16(vr, va[4], vb[5]);
+    vr = vmlaq_u16(vr, va[5], vb[4]);
+    vr = vmlaq_u16(vr, va[6], vb[3]);
+    vr = vmlaq_u16(vr, va[7], vb[2]);
+    vr = vmlaq_u16(vr, va[8], vb[1]);
+    vr = vmlaq_u16(vr, va[9], vb[0]);
+    vst1q_u16(r + 32 * 1 + 8, vr);
+
+    va[10] = vld1q_u16(a + 16 * 2 + 8);
+    vb[10] = vld1q_u16(b + 16 * 2 + 8);
+    vr = vmulq_u16(va[0], vb[10]);
+    vr = vmlaq_u16(vr, va[1], vb[9]);
+    vr = vmlaq_u16(vr, va[2], vb[8]);
+    vr = vmlaq_u16(vr, va[3], vb[7]);
+    vr = vmlaq_u16(vr, va[4], vb[6]);
+    vr = vmlaq_u16(vr, va[5], vb[5]);
+    vr = vmlaq_u16(vr, va[6], vb[4]);
+    vr = vmlaq_u16(vr, va[7], vb[3]);
+    vr = vmlaq_u16(vr, va[8], vb[2]);
+    vr = vmlaq_u16(vr, va[9], vb[1]);
+    vr = vmlaq_u16(vr, va[10], vb[0]);
+    vst1q_u16(r + 32 * 2 + 8, vr);
+
+    va[11] = vld1q_u16(a + 16 * 3 + 8);
+    vb[11] = vld1q_u16(b + 16 * 3 + 8);
+    vr = vmulq_u16(va[0], vb[11]);
+    vr = vmlaq_u16(vr, va[1], vb[10]);
+    vr = vmlaq_u16(vr, va[2], vb[9]);
+    vr = vmlaq_u16(vr, va[3], vb[8]);
+    vr = vmlaq_u16(vr, va[4], vb[7]);
+    vr = vmlaq_u16(vr, va[5], vb[6]);
+    vr = vmlaq_u16(vr, va[6], vb[5]);
+    vr = vmlaq_u16(vr, va[7], vb[4]);
+    vr = vmlaq_u16(vr, va[8], vb[3]);
+    vr = vmlaq_u16(vr, va[9], vb[2]);
+    vr = vmlaq_u16(vr, va[10], vb[1]);
+    vr = vmlaq_u16(vr, va[11], vb[0]);
+    vst1q_u16(r + 32 * 3 + 8, vr);
+
+    va[12] = vld1q_u16(a + 16 * 4 + 8);
+    vb[12] = vld1q_u16(b + 16 * 4 + 8);
+    vr = vmulq_u16(va[0], vb[12]);
+    vr = vmlaq_u16(vr, va[1], vb[11]);
+    vr = vmlaq_u16(vr, va[2], vb[10]);
+    vr = vmlaq_u16(vr, va[3], vb[9]);
+    vr = vmlaq_u16(vr, va[4], vb[8]);
+    vr = vmlaq_u16(vr, va[5], vb[7]);
+    vr = vmlaq_u16(vr, va[6], vb[6]);
+    vr = vmlaq_u16(vr, va[7], vb[5]);
+    vr = vmlaq_u16(vr, va[8], vb[4]);
+    vr = vmlaq_u16(vr, va[9], vb[3]);
+    vr = vmlaq_u16(vr, va[10], vb[2]);
+    vr = vmlaq_u16(vr, va[11], vb[1]);
+    vr = vmlaq_u16(vr, va[12], vb[0]);
+    vst1q_u16(r + 32 * 4 + 8, vr);
+
+    va[13] = vld1q_u16(a + 16 * 5 + 8);
+    vb[13] = vld1q_u16(b + 16 * 5 + 8);
+    vr = vmulq_u16(va[0], vb[13]);
+    vr = vmlaq_u16(vr, va[1], vb[12]);
+    vr = vmlaq_u16(vr, va[2], vb[11]);
+    vr = vmlaq_u16(vr, va[3], vb[10]);
+    vr = vmlaq_u16(vr, va[4], vb[9]);
+    vr = vmlaq_u16(vr, va[5], vb[8]);
+    vr = vmlaq_u16(vr, va[6], vb[7]);
+    vr = vmlaq_u16(vr, va[7], vb[6]);
+    vr = vmlaq_u16(vr, va[8], vb[5]);
+    vr = vmlaq_u16(vr, va[9], vb[4]);
+    vr = vmlaq_u16(vr, va[10], vb[3]);
+    vr = vmlaq_u16(vr, va[11], vb[2]);
+    vr = vmlaq_u16(vr, va[12], vb[1]);
+    vr = vmlaq_u16(vr, va[13], vb[0]);
+    vst1q_u16(r + 32 * 5 + 8, vr);
+
+    va[14] = vld1q_u16(a + 16 * 6 + 8);
+    vb[14] = vld1q_u16(b + 16 * 6 + 8);
+    vr = vmulq_u16(va[0], vb[14]);
+    vr = vmlaq_u16(vr, va[1], vb[13]);
+    vr = vmlaq_u16(vr, va[2], vb[12]);
+    vr = vmlaq_u16(vr, va[3], vb[11]);
+    vr = vmlaq_u16(vr, va[4], vb[10]);
+    vr = vmlaq_u16(vr, va[5], vb[9]);
+    vr = vmlaq_u16(vr, va[6], vb[8]);
+    vr = vmlaq_u16(vr, va[7], vb[7]);
+    vr = vmlaq_u16(vr, va[8], vb[6]);
+    vr = vmlaq_u16(vr, va[9], vb[5]);
+    vr = vmlaq_u16(vr, va[10], vb[4]);
+    vr = vmlaq_u16(vr, va[11], vb[3]);
+    vr = vmlaq_u16(vr, va[12], vb[2]);
+    vr = vmlaq_u16(vr, va[13], vb[1]);
+    vr = vmlaq_u16(vr, va[14], vb[0]);
+    vst1q_u16(r + 32 * 6 + 8, vr);
+
+    vr = vmulq_u16(va[1], vb[14]);
+    vr = vmlaq_u16(vr, va[2], vb[13]);
+    vr = vmlaq_u16(vr, va[3], vb[12]);
+    vr = vmlaq_u16(vr, va[4], vb[11]);
+    vr = vmlaq_u16(vr, va[5], vb[10]);
+    vr = vmlaq_u16(vr, va[6], vb[9]);
+    vr = vmlaq_u16(vr, va[7], vb[8]);
+    vr = vmlaq_u16(vr, va[8], vb[7]);
+    vr = vmlaq_u16(vr, va[9], vb[6]);
+    vr = vmlaq_u16(vr, va[10], vb[5]);
+    vr = vmlaq_u16(vr, va[11], vb[4]);
+    vr = vmlaq_u16(vr, va[12], vb[3]);
+    vr = vmlaq_u16(vr, va[13], vb[2]);
+    vr = vmlaq_u16(vr, va[14], vb[1]);
+    vst1q_u16(r + 32 * 7 + 8, vr);
+
+    vr = vmulq_u16(va[2], vb[14]);
+    vr = vmlaq_u16(vr, va[3], vb[13]);
+    vr = vmlaq_u16(vr, va[4], vb[12]);
+    vr = vmlaq_u16(vr, va[5], vb[11]);
+    vr = vmlaq_u16(vr, va[6], vb[10]);
+    vr = vmlaq_u16(vr, va[7], vb[9]);
+    vr = vmlaq_u16(vr, va[8], vb[8]);
+    vr = vmlaq_u16(vr, va[9], vb[7]);
+    vr = vmlaq_u16(vr, va[10], vb[6]);
+    vr = vmlaq_u16(vr, va[11], vb[5]);
+    vr = vmlaq_u16(vr, va[12], vb[4]);
+    vr = vmlaq_u16(vr, va[13], vb[3]);
+    vr = vmlaq_u16(vr, va[14], vb[2]);
+    vst1q_u16(r + 32 * 0 + 16, vr);
+
+    vr = vmulq_u16(va[3], vb[14]);
+    vr = vmlaq_u16(vr, va[4], vb[13]);
+    vr = vmlaq_u16(vr, va[5], vb[12]);
+    vr = vmlaq_u16(vr, va[6], vb[11]);
+    vr = vmlaq_u16(vr, va[7], vb[10]);
+    vr = vmlaq_u16(vr, va[8], vb[9]);
+    vr = vmlaq_u16(vr, va[9], vb[8]);
+    vr = vmlaq_u16(vr, va[10], vb[7]);
+    vr = vmlaq_u16(vr, va[11], vb[6]);
+    vr = vmlaq_u16(vr, va[12], vb[5]);
+    vr = vmlaq_u16(vr, va[13], vb[4]);
+    vr = vmlaq_u16(vr, va[14], vb[3]);
+    vst1q_u16(r + 32 * 1 + 16, vr);
+
+    vr = vmulq_u16(va[4], vb[14]);
+    vr = vmlaq_u16(vr, va[5], vb[13]);
+    vr = vmlaq_u16(vr, va[6], vb[12]);
+    vr = vmlaq_u16(vr, va[7], vb[11]);
+    vr = vmlaq_u16(vr, va[8], vb[10]);
+    vr = vmlaq_u16(vr, va[9], vb[9]);
+    vr = vmlaq_u16(vr, va[10], vb[8]);
+    vr = vmlaq_u16(vr, va[11], vb[7]);
+    vr = vmlaq_u16(vr, va[12], vb[6]);
+    vr = vmlaq_u16(vr, va[13], vb[5]);
+    vr = vmlaq_u16(vr, va[14], vb[4]);
+    vst1q_u16(r + 32 * 2 + 16, vr);
+
+    vr = vmulq_u16(va[5], vb[14]);
+    vr = vmlaq_u16(vr, va[6], vb[13]);
+    vr = vmlaq_u16(vr, va[7], vb[12]);
+    vr = vmlaq_u16(vr, va[8], vb[11]);
+    vr = vmlaq_u16(vr, va[9], vb[10]);
+    vr = vmlaq_u16(vr, va[10], vb[9]);
+    vr = vmlaq_u16(vr, va[11], vb[8]);
+    vr = vmlaq_u16(vr, va[12], vb[7]);
+    vr = vmlaq_u16(vr, va[13], vb[6]);
+    vr = vmlaq_u16(vr, va[14], vb[5]);
+    vst1q_u16(r + 32 * 3 + 16, vr);
+
+    vr = vmulq_u16(va[6], vb[14]);
+    vr = vmlaq_u16(vr, va[7], vb[13]);
+    vr = vmlaq_u16(vr, va[8], vb[12]);
+    vr = vmlaq_u16(vr, va[9], vb[11]);
+    vr = vmlaq_u16(vr, va[10], vb[10]);
+    vr = vmlaq_u16(vr, va[11], vb[9]);
+    vr = vmlaq_u16(vr, va[12], vb[8]);
+    vr = vmlaq_u16(vr, va[13], vb[7]);
+    vr = vmlaq_u16(vr, va[14], vb[6]);
+    vst1q_u16(r + 32 * 4 + 16, vr);
+
+    vr = vmulq_u16(va[7], vb[14]);
+    vr = vmlaq_u16(vr, va[8], vb[13]);
+    vr = vmlaq_u16(vr, va[9], vb[12]);
+    vr = vmlaq_u16(vr, va[10], vb[11]);
+    vr = vmlaq_u16(vr, va[11], vb[10]);
+    vr = vmlaq_u16(vr, va[12], vb[9]);
+    vr = vmlaq_u16(vr, va[13], vb[8]);
+    vr = vmlaq_u16(vr, va[14], vb[7]);
+    vst1q_u16(r + 32 * 5 + 16, vr);
+
+    vr = vmulq_u16(va[8], vb[14]);
+    vr = vmlaq_u16(vr, va[9], vb[13]);
+    vr = vmlaq_u16(vr, va[10], vb[12]);
+    vr = vmlaq_u16(vr, va[11], vb[11]);
+    vr = vmlaq_u16(vr, va[12], vb[10]);
+    vr = vmlaq_u16(vr, va[13], vb[9]);
+    vr = vmlaq_u16(vr, va[14], vb[8]);
+    vst1q_u16(r + 32 * 6 + 16, vr);
+
+    vr = vmulq_u16(va[9], vb[14]);
+    vr = vmlaq_u16(vr, va[10], vb[13]);
+    vr = vmlaq_u16(vr, va[11], vb[12]);
+    vr = vmlaq_u16(vr, va[12], vb[11]);
+    vr = vmlaq_u16(vr, va[13], vb[10]);
+    vr = vmlaq_u16(vr, va[14], vb[9]);
+    vst1q_u16(r + 32 * 7 + 16, vr);
+
+    vr = vmulq_u16(va[10], vb[14]);
+    vr = vmlaq_u16(vr, va[11], vb[13]);
+    vr = vmlaq_u16(vr, va[12], vb[12]);
+    vr = vmlaq_u16(vr, va[13], vb[11]);
+    vr = vmlaq_u16(vr, va[14], vb[10]);
+    vst1q_u16(r + 32 * 0 + 24, vr);
+
+    vr = vmulq_u16(va[11], vb[14]);
+    vr = vmlaq_u16(vr, va[12], vb[13]);
+    vr = vmlaq_u16(vr, va[13], vb[12]);
+    vr = vmlaq_u16(vr, va[14], vb[11]);
+    vst1q_u16(r + 32 * 1 + 24, vr);
+
+    vr = vmulq_u16(va[12], vb[14]);
+    vr = vmlaq_u16(vr, va[13], vb[13]);
+    vr = vmlaq_u16(vr, va[14], vb[12]);
+    vst1q_u16(r + 32 * 2 + 24, vr);
+
+    vr = vmulq_u16(va[13], vb[14]);
+    vr = vmlaq_u16(vr, va[14], vb[13]);
+    vst1q_u16(r + 32 * 3 + 24, vr);
+
+    vr = vmulq_u16(va[14], vb[14]);
+    vst1q_u16(r + 32 * 4 + 24, vr);
+
+    vr = vdupq_n_u16(0);
+    vst1q_u16(r + 32 * 5 + 24, vr);
+    vst1q_u16(r + 32 * 6 + 24, vr);
+    vst1q_u16(r + 32 * 7 + 24, vr);
 }
 
 static void toom3_toom4_k2x2_interpolate(uint16_t r[2 * L], const uint16_t a[5 * 2 * 64 * K16]) {

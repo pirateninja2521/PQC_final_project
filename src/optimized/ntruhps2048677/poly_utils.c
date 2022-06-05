@@ -2,7 +2,7 @@
 
 #include "poly_utils.h"
 
-void transpose8x16(uint16_t *polys) {
+void transpose8x8x16(uint16_t polys[8 * 8 * 16]) {
     uint16x8_t  v0,  v1,  v2,  v3,  v4,  v5,  v6,  v7,
                 v8,  v9, v10, v11, v12, v13, v14, v15,
                v16, v17, v18, v19;
@@ -102,7 +102,7 @@ void transpose8x16(uint16_t *polys) {
     }
 }
 
-void transpose8x32(uint16_t *polys) {
+void transpose8x8x32(uint16_t polys[8 * 8 * 32]) {
     uint16x8_t  v0,  v1,  v2,  v3,  v4,  v5,  v6,  v7,
                 v8,  v9, v10, v11, v12, v13, v14, v15,
                v16, v17, v18, v19;

@@ -6,7 +6,7 @@
 
 #include "params.h"
 
-void transpose8x16(uint16_t *polys);
-void transpose8x32(uint16_t *polys);
+void transpose8x8x16(uint16_t polys[8 * 8 * 16]);
+void transpose8x8x32(uint16_t polys[8 * 8 * 32]);
 
 #endif
